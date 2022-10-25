@@ -1,8 +1,8 @@
 from graph_logic.constants import *
-from graph_logic.inventory import EXTENDED_ITEM, HINT_BYPASS_BIT, Inventory
+from graph_logic.inventory import EXTENDED_ITEM
 from graph_logic.logic import DNFInventory
 from graph_logic.logic_input import Areas
-from hints.hint_distribution import HintDistribution
+from hints.hint_distribution import MAX_HINTS_PER_STONE, HintDistribution
 from hints.hint_types import *
 from .randomize import LogicUtils, UserOutput
 from options import Options
@@ -106,8 +106,18 @@ class Hints:
         self.max_hints_per_stone = self.dist.max_hints_per_stone
         self.randomize(hints)
 
+        def wrap(hintnames):
+            assert 0 <= len(hintnames) <= MAX_HINTS_PER_STONE
+            return GossipStoneHintWrapper(
+                *(hints[name] for name in hintnames),
+                *(
+                    self.dist._create_junk_hint()
+                    for _ in range(MAX_HINTS_PER_STONE - len(hintnames))
+                ),
+            )
+
         return {
-            stone: GossipStoneHintWrapper(*(hints[name] for name in hintnames))
+            stone: wrap(hintnames)
             for stone, hintnames in self.logic.placement.stones.items()
         }
 
@@ -127,7 +137,7 @@ class Hints:
         )
         self.logic.fill_inventory_i(monotonic=False)
 
-        for hintname in HINTS:
+        for hintname in hints:
             if not self.place_hint(hintname):
                 raise self.useroutput.GenerationFailed(f"could not place {hintname}")
 
@@ -140,7 +150,10 @@ class Hints:
         available_stones = [
             stone
             for stone in accessible_stones
-            if len(self.logic.placement.stones[stone]) < self.max_hints_per_stone[stone]
+            for spot in range(
+                self.max_hints_per_stone[stone]
+                - len(self.logic.placement.stones[stone])
+            )
         ]
 
         if available_stones:
@@ -157,9 +170,11 @@ class Hints:
                 f"no more location accessible for {hintname}"
             )
 
-        stone = self.rng.choice(accessible_stones)
-        old_hints = self.placement.stones[stone]
-        assert old_hints
-        old_hint = self.rng.choice(old_hints)
-        new_hint = self.logic.replace_item(stone, hintname, old_hint)
-        return self.place_hint(new_hint, depth + 1)
+        spots = [
+            (stone, old_hint)
+            for stone in accessible_stones
+            for old_hint in self.placement.stones[stone]
+        ]
+        stone, old_hint = self.rng.choice(spots)
+        old_removed_hint = self.logic.replace_item(stone, hintname, old_hint)
+        return self.place_hint(old_removed_hint, depth + 1)
