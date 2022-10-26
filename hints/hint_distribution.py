@@ -248,28 +248,12 @@ class HintDistribution:
 
         region_barren, nonprogress = self.logic.get_barren_regions()
         for zone in region_barren:
-            if ("Silent Realm" in zone) or (zone == "Flooded Faron Woods"):
-                continue  # don't hint barren silent realms since they are an always hint
-            if options["empty-unrequired-dungeons"]:
-                # avoid placing barren hints for unrequired dungeons in race mode
-                if (
-                    not options["triforce-required"]
-                    or options["triforce-shuffle"] == "Anywhere"
-                ) and (zone == SK):
-                    # skykeep is always barren when race mode is on and Sky Keep is skipped
-                    continue
-                if (
-                    zone in REGULAR_DUNGEONS
-                    and zone not in self.logic.required_dungeons
-                ):
-                    # unrequired dungeons are always barren in race mode
-                    continue
-            if zone == SK:
-                # exclude Sky Keep from the eligible barren locations if it has no open checks
-                if options["map-mode"] not in ["Removed", "Anywhere",] or options[
-                    "small-key-mode"
-                ] not in ["Anywhere"]:
-                    continue
+            if all(
+                loc in self.hinted_locations
+                for loc in self.logic.locations_by_hint_region(zone)
+            ):
+                continue
+
             if zone in ALL_DUNGEONS:
                 self.barren_dungeons.append(zone)
             else:
@@ -349,54 +333,45 @@ class HintDistribution:
             self.areas.checks[hint].get("text"),
         )
 
-    def _create_sots_hint(self):
-        if not self.sots_locations:
-            return None
-        zone, loc, item = self.sots_locations.pop()
-        if loc in self.hinted_locations:
-            return self._create_sots_hint()
-        if self.sots_dungeon_placed >= self.dungeon_sots_limit and zone in ALL_DUNGEONS:
-            return self._create_sots_hint()
-        if zone in ALL_DUNGEONS:
-            self.sots_dungeon_placed += 1
-        self.hinted_locations.append(loc)
-        if (zone := self.areas.checks[loc].get("cube_region")) is not None:
-            # place cube sots hint & catch specific zones and fit them into their general zone (as seen in the cube progress options)
-            if self.options["cube-sots"]:
-                if zone == SV:
-                    zone = FARON_WOODS
-                elif zone == MOGMA_TURF:
-                    zone = ELDIN_VOLCANO
-                elif zone == LANAYRU_MINES:
-                    zone = LANAYRU_DESERT
-                elif zone == LANAYRU_GORGE:
-                    zone = SAND_SEA
-                return CubeSotsGoalGossipStoneHint(loc, item, zone)
-        zone = self.areas.checks[loc]["hint_region"]
-        return SotsGoalGossipStoneHint(loc, item, zone)
+    def _create_sots_goal_hint(self, goal_mode=False):
+        if goal_mode:
+            locs = self.goal_locations[self.goal_index]
+        else:
+            locs = self.sots_locations
 
-    def _create_goal_hint(self):
-        if not self.goal_locations[self.goal_index]:
+        if not locs:
+            if not goal_mode:
+                return None
             # if there aren't applicable locations for any goal, return None
             if not any(self.goal_locations):
                 return None
             # go to next goal if no locations are left for this goal
             self.goal_index += 1
             self.goal_index %= len(self.goals)
-            return self._create_goal_hint()
-        zone, loc, item = self.goal_locations[self.goal_index].pop()
+            return self._create_sots_goal_hint(goal_mode)
+
+        zone, loc, item = locs.pop()
+
         if loc in self.hinted_locations:
-            return self._create_goal_hint()
+            return self._create_sots_goal_hint(goal_mode)
+
         if self.sots_dungeon_placed >= self.dungeon_sots_limit and zone in ALL_DUNGEONS:
-            return self._create_goal_hint()
+            return self._create_sots_goal_hint(goal_mode)
+
         if zone in ALL_DUNGEONS:
             # goal hints will use the same dungeon limits as sots hints
             self.sots_dungeon_placed += 1
+
         self.hinted_locations.append(loc)
-        # move to next goal boss for next goal hint
-        goal = self.goals[self.goal_index]
-        self.goal_index += 1
-        self.goal_index %= len(self.goals)
+
+        if goal_mode:
+            # move to next goal boss for next goal hint
+            goal = self.goals[self.goal_index]
+            self.goal_index += 1
+            self.goal_index %= len(self.goals)
+        else:
+            goal = None
+
         if (zone := self.areas.checks[loc].get("cube_region")) is not None:
             # place cube sots hint & catch specific zones and fit them into their general zone (as seen in the cube progress options)
             if self.options["cube-sots"]:
@@ -412,51 +387,53 @@ class HintDistribution:
         zone = self.areas.checks[loc]["hint_region"]
         return SotsGoalGossipStoneHint(loc, item, zone, goal)
 
+    def _create_sots_hint(self):
+        return self._create_sots_goal_hint(goal_mode=False)
+
+    def _create_goal_hint(self):
+        return self._create_sots_goal_hint(goal_mode=True)
+
     def _create_barren_hint(self):
+        # weights = (dungeon_weight, overworld_weight)
         if self.prev_barren_type is None:
             # 50/50 between dungeon and overworld on the first hint
-            self.prev_barren_type = self.rng.choices(
-                ["dungeon", "overworld"], [0.5, 0.5]
-            )[0]
+            weights = (1, 1)
         elif self.prev_barren_type == "dungeon":
-            self.prev_barren_type = self.rng.choices(
-                ["dungeon", "overworld"], [0.25, 0.75]
-            )[0]
+            weights = (1, 3)
         elif self.prev_barren_type == "overworld":
-            self.prev_barren_type = self.rng.choices(
-                ["dungeon", "overworld"], [0.75, 0.25]
-            )[0]
+            weights = (3, 1)
+        else:
+            assert False
+
+        barren_type = self.rng.choices(["dungeon", "overworld"], weights)[0]
 
         # Check against caps
-        if self.prev_barren_type == "dungeon":
-            if self.placed_dungeon_barren > self.dungeon_barren_limit:
-                self.prev_barren_type = "overworld"
+        if self.placed_dungeon_barren > self.dungeon_barren_limit:
+            barren_type = "overworld"
 
         # Failsafes if there are not enough barren hints to fill out the generated hint
-        if len(self.barren_dungeons) == 0 and self.prev_barren_type == "dungeon":
-            self.prev_barren_type = "overworld"
+        if len(self.barren_dungeons) == 0:
             if len(self.barren_overworld_zones) == 0:
                 return None
-        if (
-            len(self.barren_overworld_zones) == 0
-            and self.prev_barren_type == "overworld"
-        ):
-            self.prev_barren_type = "dungeon"
-            if len(self.barren_dungeons) == 0:
-                return None
+            barren_type = "overworld"
+        if len(self.barren_overworld_zones) == 0:
+            barren_type = "dungeon"
 
         # generate a hint and remove it from the lists
-        if self.prev_barren_type == "dungeon":
+        if barren_type == "dungeon":
             barren_area_list = self.barren_dungeons
         else:
             barren_area_list = self.barren_overworld_zones
+
         weights = [
             len(list(self.logic.locations_by_hint_region(area)))
             for area in barren_area_list
         ]
+
         area = self.rng.choices(barren_area_list, weights)[0]
         barren_area_list.remove(area)
         self.barren_hinted_areas.add(area)
+        self.prev_barren_type = barren_type
         return BarrenGossipStoneHint(area)
 
     def _create_item_hint(self):
