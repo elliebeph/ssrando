@@ -322,16 +322,16 @@ class HintDistribution:
     def _create_sometimes_hint(self):
         if not self.sometimes_hints:
             return None
-        hint = self.sometimes_hints.pop()
-        if hint in self.hinted_locations:
+
+        loc = self.sometimes_hints.pop()
+        item = self.logic.placement.locations[loc]
+        text = self.areas.checks[loc].get("text")
+
+        if loc in self.hinted_locations:
             return self._create_sometimes_hint()
-        self.hinted_locations.append(hint)
-        return LocationGossipStoneHint(
-            "sometimes",
-            hint,
-            self.logic.placement.locations[hint],
-            self.areas.checks[hint].get("text"),
-        )
+        self.hinted_locations.append(loc)
+
+        return LocationGossipStoneHint("sometimes", loc, item, text)
 
     def _create_sots_goal_hint(self, goal_mode=False):
         if goal_mode:
@@ -412,6 +412,16 @@ class HintDistribution:
             barren_type = "overworld"
 
         # Failsafes if there are not enough barren hints to fill out the generated hint
+        unhinted_locs_by_region = lambda area: [
+            loc
+            for loc in self.logic.locations_by_hint_region(area)
+            if loc not in self.hinted_locations
+        ]
+        for barren_area_list in (self.barren_dungeons, self.barren_overworld_zones):
+            for region in barren_area_list:
+                if not len(unhinted_locs_by_region(region)):
+                    barren_area_list.remove(region)
+
         if len(self.barren_dungeons) == 0:
             if len(self.barren_overworld_zones) == 0:
                 return None
@@ -425,15 +435,13 @@ class HintDistribution:
         else:
             barren_area_list = self.barren_overworld_zones
 
-        weights = [
-            len(list(self.logic.locations_by_hint_region(area)))
-            for area in barren_area_list
-        ]
+        weights = [len(unhinted_locs_by_region(area)) for area in barren_area_list]
 
         area = self.rng.choices(barren_area_list, weights)[0]
         barren_area_list.remove(area)
         self.barren_hinted_areas.add(area)
         self.prev_barren_type = barren_type
+
         return BarrenGossipStoneHint(area)
 
     def _create_item_hint(self):
@@ -441,16 +449,15 @@ class HintDistribution:
             return None
         item = self.hintable_items.pop()
         location = self.logic.placement.items[item]
+
         if location in self.hinted_locations:
             return self._create_item_hint()
         self.hinted_locations.append(location)
+
         if self.options["precise-item"]:
-            return LocationGossipStoneHint(
-                "precise_item",
-                location,
-                item,
-                self.areas.checks[location].get("text"),
-            )
+            text = self.areas.checks[location].get("text")
+            return LocationGossipStoneHint("precise_item", location, item, text)
+
         if (zone_override := self.areas.checks[location].get("cube_region")) is None:
             zone_override = self.areas.checks[location]["hint_region"]
 
@@ -467,29 +474,27 @@ class HintDistribution:
         ]
 
         assert all_locations_without_hint
+
         loc = self.rng.choice(all_locations_without_hint)
+        item = self.logic.placement.locations[loc]
+        text = self.areas.checks[loc].get("text")
         self.hinted_locations.append(loc)
-        return LocationGossipStoneHint(
-            "random",
-            loc,
-            self.logic.placement.locations[loc],
-            self.areas.checks[loc].get("text"),
-        )
+
+        return LocationGossipStoneHint("random", loc, item, text)
 
     def _create_bk_hint(self):
         if not self.required_boss_keys:
             return None
+
         item = self.required_boss_keys.pop()
         loc = self.logic.placement.items[item]
+        text = self.areas.checks[loc].get("text")
+
         if loc in self.hinted_locations:
             return self._create_bk_hint()
         self.hinted_locations.append(loc)
-        return LocationGossipStoneHint(
-            "boss_key",
-            loc,
-            item,
-            self.areas.checks[loc].get("text"),
-        )
+
+        return LocationGossipStoneHint("boss_key", loc, item, text)
 
     def _create_junk_hint(self):
         return EmptyGossipStoneHint(self.junk_hints.pop())
