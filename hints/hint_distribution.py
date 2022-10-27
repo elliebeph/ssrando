@@ -91,12 +91,6 @@ class HintDistribution:
         self.sots_dungeon_placed = 0
         self.dungeon_barren_limit = 0
         self.distribution = {}
-        self.hints = []
-        self.weighted_types = []
-        self.weights = []
-        self.sots_locations = []
-        self.goal_locations = []
-        self.goals = []
         self.goal_index = 0
         self.barren_overworld_zones = []
         self.placed_ow_barren = 0
@@ -104,13 +98,11 @@ class HintDistribution:
         self.placed_dungeon_barren = 0
         self.prev_barren_type = None
         self.hinted_locations = []
-        self.hintable_items = []
-        self.junk_hints = []
-        self.sometimes_hints = []
         self.barren_hinted_areas = set()
         self.counts_by_type = defaultdict(int)
 
         self.hintfuncs = {
+            "always": self._create_always_hint,
             "sometimes": self._create_sometimes_hint,
             "sots": self._create_sots_hint,
             "goal": self._create_goal_hint,
@@ -189,36 +181,9 @@ class HintDistribution:
             if loc in sometimes_hints:
                 sometimes_hints.remove(loc)
 
-        silent_realm_checks_rev = SILENT_REALM_CHECKS_REV(self.areas.short_to_full)
-        trial_rando = self.options["randomize-trials"]
-
-        # all always hints are always hinted
-        for hint in always_hints:
-            self.hinted_locations.append(hint)
-            if trial_rando and hint in silent_realm_checks_rev:
-                trial = silent_realm_checks_rev[hint]
-                trial_gate = {
-                    v: k for k, v in self.logic.randomized_trial_entrance.items()
-                }[trial]
-                trial_item = self.logic.placement.locations[hint]
-                self.hints.extend(
-                    [TrialGateGossipStoneHint(hint, trial_item, trial_gate)]
-                    * self.distribution["always"]["copies"]
-                )
-            else:
-                self.hints.extend(
-                    [
-                        LocationGossipStoneHint(
-                            "always",
-                            hint,
-                            self.logic.placement.locations[hint],
-                            self.logic.areas.checks[hint].get("text"),
-                        )
-                    ]
-                    * self.distribution["always"]["copies"]
-                )
-        self.rng.shuffle(self.hints)
+        self.rng.shuffle(always_hints)
         self.rng.shuffle(sometimes_hints)
+        self.always_hints = always_hints
         self.sometimes_hints = sometimes_hints
 
         # creates a list of boss key locations for required dungeons
@@ -240,11 +205,24 @@ class HintDistribution:
         self.rng.shuffle(self.goals)
         # create corresponding list of shuffled goal items
 
+        self.goal_locations = []
         for goal in self.goals:
             check = areas.short_to_full(GOAL_CHECKS[goal])
             goal_locations = list(self.logic.get_sots_locations(EXTENDED_ITEM[check]))
             self.rng.shuffle(goal_locations)
             self.goal_locations.append(goal_locations)
+
+        self.hintable_items = list(HINTABLE_ITEMS)
+        for item in self.added_items:
+            self.hintable_items.extend([item["name"]] * item["amount"])
+        if SEA_CHART in self.logic.get_useful_items():
+            self.hintable_items.append(SEA_CHART)
+        for item in self.removed_items:
+            if (loc := self.logic.placement.items[item]) not in self.hinted_locations:
+                self.hinted_locations.append(loc)
+            if item in self.hintable_items:
+                self.hintable_items.remove(item)
+        self.rng.shuffle(self.hintable_items)
 
         region_barren, nonprogress = self.logic.get_barren_regions()
         for zone in region_barren:
@@ -259,44 +237,32 @@ class HintDistribution:
             else:
                 self.barren_overworld_zones.append(zone)
 
-        self.hintable_items = list(HINTABLE_ITEMS)
-        for item in self.added_items:
-            self.hintable_items.extend([item["name"]] * item["amount"])
-        if SEA_CHART in self.logic.get_useful_items():
-            self.hintable_items.append(SEA_CHART)
-        for item in self.removed_items:
-            if (loc := self.logic.placement.items[item]) not in self.hinted_locations:
-                self.hinted_locations.append(loc)
-            if item in self.hintable_items:
-                self.hintable_items.remove(item)
-        self.rng.shuffle(self.hintable_items)
-
-        needed_fixed = []
-
         # for each fixed goal hint, place one for each required dungeon
         if "goal" in self.distribution.keys():
             self.distribution["goal"]["fixed"] *= len(self.logic.required_dungeons)
+        # all always hints are always hinted
+        self.distribution["always"]["fixed"] = len(self.always_hints)
 
-        for type in self.distribution.keys():
-            if self.distribution[type]["fixed"] > 0:
-                needed_fixed.append(type)
+        needed_fixed = []
+        for hint_type in self.distribution.keys():
+            if self.distribution[hint_type]["fixed"] > 0:
+                needed_fixed.append(hint_type)
         needed_fixed.sort(key=lambda type: self.distribution[type]["order"])
 
         self.junk_hints = JUNK_TEXT.copy()
         self.rng.shuffle(self.junk_hints)
 
-        for type in needed_fixed:
-            curr_type = self.distribution[type]
-            func = self.hintfuncs[type]
+        self.hints = []
+        for hint_type in needed_fixed:
+            curr_type = self.distribution[hint_type]
+            func = self.hintfuncs[hint_type]
             for _ in range(curr_type["fixed"]):
-                if hint := func():
-                    self.counts_by_type[type] += 1
-                    self.hints.extend([hint] * curr_type["copies"])
+                if (loc := func()) is not None:
+                    self.counts_by_type[hint_type] += 1
+                    self.hints.extend([loc] * curr_type["copies"])
 
-        # reverse the list of hints to we can pop off the back in O(1)
-        # this also preserves the order they were added as they are removed so that order parameter is repsected
-        self.hints.reverse()
-
+        self.weighted_types = []
+        self.weights = []
         for hint_type in self.distribution.keys():
             self.weighted_types.append(hint_type)
             self.weights.append(self.distribution[hint_type]["weight"])
@@ -309,15 +275,43 @@ class HintDistribution:
         hints = self.hints
         count = self.nb_hints
         while len(hints) < count:
-            [next_type] = self.rng.choices(self.weighted_types, self.weights)
-            if (limit := self.distribution[next_type].get("max")) is not None:
-                if self.counts_by_type[next_type] >= limit:
-                    continue
-            if hint := self.hintfuncs[next_type]():
-                self.counts_by_type[next_type] += 1
-                hints.extend([hint] * self.distribution[next_type]["copies"])
+            [hint_type] = self.rng.choices(self.weighted_types, self.weights)
+            func = self.hintfuncs[hint_type]
+            limit = self.distribution[hint_type].get("max")
+
+            if limit is not None and self.counts_by_type[hint_type] >= limit:
+                continue
+
+            if (hint := func()) is not None:
+                self.counts_by_type[hint_type] += 1
+                hints.extend([hint] * self.distribution[hint_type]["copies"])
+
         hints = hints[:count]
         return hints
+
+    def _create_always_hint(self):
+        if not self.always_hints:
+            return None
+
+        loc = self.always_hints.pop()
+        item = self.logic.placement.locations[loc]
+        text = self.areas.checks[loc].get("text")
+
+        if loc in self.hinted_locations:
+            return self._create_always_hint()
+        self.hinted_locations.append(loc)
+
+        silent_realm_checks_rev = SILENT_REALM_CHECKS_REV(self.areas.short_to_full)
+        trial_rando = self.options["randomize-trials"]
+
+        if trial_rando and loc in silent_realm_checks_rev:
+            trial = silent_realm_checks_rev[loc]
+            trial_gate = {
+                v: k for k, v in self.logic.randomized_trial_entrance.items()
+            }[trial]
+            return TrialGateGossipStoneHint(loc, item, trial_gate)
+        else:
+            return LocationGossipStoneHint("always", loc, item, text)
 
     def _create_sometimes_hint(self):
         if not self.sometimes_hints:
@@ -332,6 +326,58 @@ class HintDistribution:
         self.hinted_locations.append(loc)
 
         return LocationGossipStoneHint("sometimes", loc, item, text)
+
+    def _create_bk_hint(self):
+        if not self.required_boss_keys:
+            return None
+
+        item = self.required_boss_keys.pop()
+        loc = self.logic.placement.items[item]
+        text = self.areas.checks[loc].get("text")
+
+        if loc in self.hinted_locations:
+            return self._create_bk_hint()
+        self.hinted_locations.append(loc)
+
+        return LocationGossipStoneHint("boss_key", loc, item, text)
+
+    def _create_item_hint(self):
+        if not self.hintable_items:
+            return None
+
+        item = self.hintable_items.pop()
+        location = self.logic.placement.items[item]
+
+        if location in self.hinted_locations:
+            return self._create_item_hint()
+        self.hinted_locations.append(location)
+
+        if self.options["precise-item"]:
+            text = self.areas.checks[location].get("text")
+            return LocationGossipStoneHint("precise_item", location, item, text)
+
+        if (zone_override := self.areas.checks[location].get("cube_region")) is None:
+            zone_override = self.areas.checks[location]["hint_region"]
+
+        return ZoneItemGossipStoneHint(location, item, zone_override)
+
+    def _create_random_hint(self):
+        all_locations_without_hint = [
+            loc
+            for loc in self.logic.placement.locations
+            if loc not in self.hinted_locations
+            and self.areas.checks[loc]["hint_region"] not in self.barren_hinted_areas
+            and EXTENDED_ITEM[loc] in self.logic.fill_restricted()
+        ]
+
+        assert all_locations_without_hint
+
+        loc = self.rng.choice(all_locations_without_hint)
+        item = self.logic.placement.locations[loc]
+        text = self.areas.checks[loc].get("text")
+        self.hinted_locations.append(loc)
+
+        return LocationGossipStoneHint("random", loc, item, text)
 
     def _create_sots_goal_hint(self, goal_mode=False):
         if goal_mode:
@@ -412,14 +458,9 @@ class HintDistribution:
             barren_type = "overworld"
 
         # Failsafes if there are not enough barren hints to fill out the generated hint
-        unhinted_locs_by_region = lambda area: [
-            loc
-            for loc in self.logic.locations_by_hint_region(area)
-            if loc not in self.hinted_locations
-        ]
         for barren_area_list in (self.barren_dungeons, self.barren_overworld_zones):
             for region in barren_area_list:
-                if not len(unhinted_locs_by_region(region)):
+                if not len(self.logic.locations_by_hint_region(region)):
                     barren_area_list.remove(region)
 
         if len(self.barren_dungeons) == 0:
@@ -435,7 +476,9 @@ class HintDistribution:
         else:
             barren_area_list = self.barren_overworld_zones
 
-        weights = [len(unhinted_locs_by_region(area)) for area in barren_area_list]
+        weights = [
+            len(self.logic.locations_by_hint_region(area)) for area in barren_area_list
+        ]
 
         area = self.rng.choices(barren_area_list, weights)[0]
         barren_area_list.remove(area)
@@ -443,58 +486,6 @@ class HintDistribution:
         self.prev_barren_type = barren_type
 
         return BarrenGossipStoneHint(area)
-
-    def _create_item_hint(self):
-        if not self.hintable_items:
-            return None
-        item = self.hintable_items.pop()
-        location = self.logic.placement.items[item]
-
-        if location in self.hinted_locations:
-            return self._create_item_hint()
-        self.hinted_locations.append(location)
-
-        if self.options["precise-item"]:
-            text = self.areas.checks[location].get("text")
-            return LocationGossipStoneHint("precise_item", location, item, text)
-
-        if (zone_override := self.areas.checks[location].get("cube_region")) is None:
-            zone_override = self.areas.checks[location]["hint_region"]
-
-        return ZoneItemGossipStoneHint(location, item, zone_override)
-
-    def _create_random_hint(self):
-        all_locations_without_hint = [
-            loc
-            for loc in self.logic.placement.locations
-            if loc not in self.hinted_locations
-            and EXTENDED_ITEM[loc] in self.logic.fill_restricted()
-            and loc not in self.logic.known_locations
-            and self.areas.checks[loc]["hint_region"] not in self.barren_hinted_areas
-        ]
-
-        assert all_locations_without_hint
-
-        loc = self.rng.choice(all_locations_without_hint)
-        item = self.logic.placement.locations[loc]
-        text = self.areas.checks[loc].get("text")
-        self.hinted_locations.append(loc)
-
-        return LocationGossipStoneHint("random", loc, item, text)
-
-    def _create_bk_hint(self):
-        if not self.required_boss_keys:
-            return None
-
-        item = self.required_boss_keys.pop()
-        loc = self.logic.placement.items[item]
-        text = self.areas.checks[loc].get("text")
-
-        if loc in self.hinted_locations:
-            return self._create_bk_hint()
-        self.hinted_locations.append(loc)
-
-        return LocationGossipStoneHint("boss_key", loc, item, text)
 
     def _create_junk_hint(self):
         return EmptyGossipStoneHint(self.junk_hints.pop())

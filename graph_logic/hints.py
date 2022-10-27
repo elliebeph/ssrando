@@ -44,15 +44,6 @@ class Hints:
         # ensure prerandomized locations cannot be hinted
         unhintables = list(self.logic.known_locations) + [START_ITEM, UNPLACED_ITEM]
 
-        # in shopsanity, we need to hint some beetle shop items
-        # add them manually, cause they need to be kinda weirdly implemented because of bug net
-        if (
-            self.options["shop-mode"] == "Randomized"
-            and "expensive" not in self.options["banned-types"]
-        ):
-            needed_always_hints.append(self.norm("Beedle - 1200 Rupee Item"))
-            needed_always_hints.append(self.norm("Beedle - 1600 Rupee Item"))
-
         hint_mode = self.options["song-hints"]
         if hint_mode != "None":
             for check in SILENT_REALM_CHECKS.values():
