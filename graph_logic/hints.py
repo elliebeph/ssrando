@@ -2,7 +2,7 @@ from graph_logic.constants import *
 from graph_logic.inventory import EXTENDED_ITEM
 from graph_logic.logic import DNFInventory
 from graph_logic.logic_input import Areas
-from hints.hint_distribution import MAX_HINTS_PER_STONE, HintDistribution
+from hints.hint_distribution import HintDistribution
 from hints.hint_types import *
 from .randomize import LogicUtils, UserOutput
 from options import Options
@@ -94,16 +94,16 @@ class Hints:
         hints = self.dist.get_hints()
         self.useroutput.progress_callback("placing hints...")
         hints = {hintname: hint for hint, hintname in zip(hints, HINTS)}
-        self.max_hints_per_stone = self.dist.max_hints_per_stone
+        self.hints_per_stone = self.dist.hints_per_stone
         self.randomize(hints)
 
         def wrap(hintnames):
-            assert 0 <= len(hintnames) <= MAX_HINTS_PER_STONE
+            assert 0 <= len(hintnames) <= self.hints_per_stone
             return GossipStoneHintWrapper(
                 *(hints[name] for name in hintnames),
                 *(
                     self.dist._create_junk_hint()
-                    for _ in range(MAX_HINTS_PER_STONE - len(hintnames))
+                    for _ in range(self.hints_per_stone - len(hintnames))
                 ),
             )
 
@@ -142,7 +142,7 @@ class Hints:
             stone
             for stone in accessible_stones
             for spot in range(
-                self.max_hints_per_stone[stone]
+                self.dist.max_hints_per_stone[stone]
                 - len(self.logic.placement.stones[stone])
             )
         ]

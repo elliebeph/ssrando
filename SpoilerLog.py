@@ -190,8 +190,7 @@ def write(
     for hintloc in areas.gossip_stones:
         hint_stone = hints[hintloc]
         file.write(f"  {norm(hintloc)+':'}\n")
-        for hint in (hint_stone.primary_hint, hint_stone.secondary_hint):
-            file.write(f"      {hint.to_spoiler_log_text(norm)}\n")
+        file.write(f"      {hint_stone.to_spoiler_log_text(norm)}\n")
 
     file.write("\n\n\n")
 

@@ -10,7 +10,6 @@ from hints.hint_types import *
 from options import Options
 from graph_logic.randomize import LogicUtils
 
-MAX_HINTS_PER_STONE = 2
 
 HINTABLE_ITEMS = (
     dict.fromkeys(
@@ -82,6 +81,7 @@ class InvalidHintDistribution(Exception):
 
 class HintDistribution:
     def __init__(self):
+        self.hints_per_stone = 0
         self.banned_stones = []
         self.added_locations = []
         self.removed_locations = []
@@ -120,6 +120,7 @@ class HintDistribution:
         self._read_from_json(json.loads(s))
 
     def _read_from_json(self, jsn):
+        self.hints_per_stone = jsn["hints_per_stone"]
         self.banned_stones = jsn["banned_stones"]
         self.added_locations = jsn["added_locations"]
         self.removed_locations = jsn["removed_locations"]
@@ -153,7 +154,7 @@ class HintDistribution:
 
         self.banned_stones = list(map(areas.short_to_full, self.banned_stones))
         self.max_hints_per_stone = {
-            stone: 0 if stone in self.banned_stones else MAX_HINTS_PER_STONE
+            stone: 0 if stone in self.banned_stones else self.hints_per_stone
             for stone in self.areas.gossip_stones
         }
         self.nb_hints = sum(self.max_hints_per_stone.values())
