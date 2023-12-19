@@ -60,6 +60,56 @@ struct AcOBird {
     speed: f32,
 }
 
+#[repr(C)]
+struct Matrix {
+    mtx: [f32; 12],
+}
+
+#[repr(C)]
+struct MTX44 {
+    mtx: [f32; 16],
+}
+
+// struct RawMutPtr<T>(pub *mut T);
+
+// impl<T> Default for RawMutPtr<T> {
+//     fn default() -> RawMutPtr<T> {
+//         RawMutPtr(core::ptr::null_mut())
+//     }
+// }
+
+// Since this is a big inheritance chain, I've simplified it a bit.
+#[derive(Default)]
+#[repr(C)]
+struct CharWriter {
+    m_color_mapping:  [u8; 8],
+    m_vertex_color:   [u8; 16],
+    m_text_color:     [u8; 12],
+    m_scale_x:        f32,
+    m_scale_y:        f32,
+    m_cursor_pos_x:   f32,
+    m_cursor_pos_y:   f32,
+    m_cursor_pos_z:   f32,
+    m_texture_filter: [u8; 8],
+    unk:              u16,
+    m_alpha:          u8,
+    mls_width_fixed:  u8,
+    m_fixed_width:    f32,
+    m_font:           u32, // actually *mut Font
+}
+
+#[derive(Default)]
+#[repr(C)]
+struct TextWriterBase {
+    char_writer:     CharWriter,
+    m_width_limit:   f32,
+    m_char_space:    f32,
+    m_line_space:    f32,
+    m_tab_width:     i32,
+    m_draw_flag:     u32,
+    m_tag_processor: u32, // actually *mut TagProcessorBase
+}
+
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SpecialMinigameState {
@@ -182,6 +232,38 @@ extern "C" {
     fn RoomManager__getRoomByIndex(room_mgr: *mut c_void, room_number: u32);
     fn Reloader__setReloadTrigger(reloader: *mut Reloader, trigger: u8);
     fn getCurrentHealth(mgr: *mut filemanager_gen::FileManager) -> u16;
+
+    fn tst(param1: *mut c_void);
+    static tst1: *mut c_void;
+    static some_font: u32;
+    static some_string: *mut c_void;
+    fn C_MTXOrtho(
+        mtx: *mut MTX44,
+        float1: f32,
+        float2: f32,
+        float3: f32,
+        float4: f32,
+        float5: f32,
+        float6: f32,
+    );
+    fn gx__GXSetProjection(mtx: *mut MTX44, param2: u32);
+    fn PSMTXIdentity(mtx: *mut Matrix);
+    fn gx__GXLoadPosMtxImm(mtx: *mut Matrix, param2: u32);
+    fn gx__GXSetCurrentMtx(param1: u32);
+    fn nw4r__ut__TextWriterBase_wchar___TextWriterBase_wchar_(
+        text_writer: *mut TextWriterBase,
+    ) -> *mut TextWriterBase;
+    fn nw4r__ut__TextWriterBase_wchar___delTextWriterBase_wchar_(
+        text_writer: *mut TextWriterBase,
+        param2: u32,
+    );
+    fn nw4r__ut__CharWriter__SetupGX(char_writer: *mut TextWriterBase); // actually *mut CharWriter
+    fn wcslen(string: *mut c_void) -> u32;
+    fn nw4r__ut__TextWriterBase_wchar____Print(
+        text_writer: *mut TextWriterBase,
+        string: *mut c_void,
+        string_length: u32,
+    );
 }
 
 fn storyflag_check(flag: u16) -> bool {
@@ -452,6 +534,9 @@ fn rando_text_command_handler(
 
             // Tadtones obtained.
             text_manager_set_num_args(&[storyflag_get_value(953) as u32]);
+
+            unsafe { tst(tst1) };
+            draw_text_to_screen();
         },
         73 => send_to_start(),
         74 => {
@@ -691,6 +776,37 @@ fn get_glow_color(item_id: u32) -> u32 {
         }
     }
     4
+}
+
+#[no_mangle]
+fn draw_text_to_screen() -> *mut TextWriterBase {
+    unsafe {
+        let mtx1: *mut MTX44 = &mut MTX44 { mtx: [0f32; 16] };
+        let mtx2: *mut Matrix = &mut Matrix { mtx: [0f32; 12] };
+        // let string: *const c_char = cstr!("Test String").as_ptr();
+
+        C_MTXOrtho(mtx1, 0f32, 4.0f32, 0f32, 4.3f32, 0f32, 1.0f32);
+        gx__GXSetProjection(mtx1, 1u32);
+
+        PSMTXIdentity(mtx2);
+        gx__GXLoadPosMtxImm(mtx2, 0);
+        gx__GXSetCurrentMtx(0);
+
+        let mut text_writer: *mut TextWriterBase = &mut TextWriterBase {
+            ..Default::default()
+        };
+        text_writer = nw4r__ut__TextWriterBase_wchar___TextWriterBase_wchar_(text_writer);
+        (*text_writer).char_writer.m_font = some_font;
+
+        nw4r__ut__CharWriter__SetupGX(text_writer);
+        (*text_writer).m_draw_flag = 0x110;
+
+        let string_length = wcslen(some_string);
+        nw4r__ut__TextWriterBase_wchar____Print(text_writer, some_string, string_length);
+        nw4r__ut__TextWriterBase_wchar___delTextWriterBase_wchar_(text_writer, 0xFFFFFFFF);
+
+        return text_writer;
+    }
 }
 
 #[panic_handler]

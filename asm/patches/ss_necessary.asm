@@ -54,6 +54,15 @@ bl set_goddess_sword_pulled_scene_flag
 .org 0x801d4b20
 li r5, -1
 
+
+; tst
+.org 0x8005248c
+nop
+
+
+
+
+
 ; patch to not update sword model when getting an upgrade
 .org 0x8005e2f0
 stwu r1, -0x30(r1) ; change function prologue to match the function it branches to at the end

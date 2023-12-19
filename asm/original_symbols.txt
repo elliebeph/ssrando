@@ -88,6 +88,21 @@ main.dol:
     memcpy: 0x800043c4
     memset: 0x80004714
     memmove: 0x804c9ca4
+
+    tst: 0x8005296c
+    tst1: 0x805750d8
+    some_font: 0x805750d8
+    C_MTXOrtho: 0x803b9070
+    gx__GXSetProjection: 0x803c2250
+    PSMTXIdentity: 0x803b7f40
+    gx__GXLoadPosMtxImm: 0x803c2350
+    gx__GXSetCurrentMtx: 0x803c2470
+    nw4r__ut__TextWriterBase_wchar___TextWriterBase_wchar_: 0x80431880
+    nw4r__ut__CharWriter__SetupGX: 0x8042db90
+    some_string: 0x8050340c
+    wcslen: 0x804d1f98
+    nw4r__ut__TextWriterBase_wchar____Print: 0x80432970
+    nw4r__ut__TextWriterBase_wchar___delTextWriterBase_wchar_: 0x804318e0
 d_a_shop_sampleNP.rel:
     SHOP_ITEMS: 0x6D8C
 d_a_obj_time_boatNP.rel:
